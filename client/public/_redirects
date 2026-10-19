@@ -1,0 +1,2 @@
+/api/* https://testcraft-ai-47yp.onrender.com/api/:splat 200
+/uploads/* https://testcraft-ai-47yp.onrender.com/uploads/:splat 200

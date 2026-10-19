@@ -210,6 +210,8 @@ NODE_ENV=production npm start
 ### Split hosting (static client + API)
 Deploy `client/dist` to a static host and proxy `/api` (and `/uploads`) to the Express server. `API_BASE` in `client/src/services/api.js` is relative, so same-origin proxying is required.
 
+For Netlify, `client/public/_redirects` proxies `/api/*` and `/uploads/*` to the Render backend at `https://testcraft-ai-47yp.onrender.com`. Vite copies this file into `client/dist` during deployment, keeping browser requests on the Netlify site's origin while forwarding API paths and query parameters to Render. Local development continues to use the backend on port 5000 through Vite's proxy.
+
 ### Production checklist
 - [ ] `NODE_ENV=production` and a strong, unique `JWT_SECRET` (rotate any secret that has been shared).
 - [ ] Rotate the MongoDB Atlas password; restrict Atlas network access to your host.
