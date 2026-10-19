@@ -1,0 +1,33 @@
+# Dependencies
+node_modules/
+*/node_modules/
+
+# Environment / secrets
+.env
+.env.local
+.env.*.local
+server/.env
+client/.env.local
+# Public (non-secret) site URL config is intentionally tracked
+!client/.env
+
+# Runtime data & user uploads
+server/data/
+server/uploads/
+server/*.log
+
+# Build output
+client/dist/
+dist/
+build/
+
+# Bundled Node runtime (local only)
+node.zip
+nodejs/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.log

@@ -1,0 +1,28 @@
+{
+  "name": "testcraft-ai-server",
+  "version": "1.0.0",
+  "description": "AI-Powered Test & Exam Generator Backend",
+  "main": "index.js",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node index.js",
+    "migrate": "node scripts/migrate-to-mongodb.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "express-rate-limit": "^8.7.1",
+    "helmet": "^8.3.0",
+    "jsonwebtoken": "^9.0.2",
+    "mongoose": "^8.9.5",
+    "multer": "^1.4.5-lts.1",
+    "nodemailer": "^10.1.7",
+    "pdf-parse": "^1.1.1",
+    "uuid": "^11.1.0"
+  }
+}

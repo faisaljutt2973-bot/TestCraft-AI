@@ -1,0 +1,15 @@
+{
+  "name": "testcraft-ai",
+  "version": "1.0.0",
+  "description": "TestCraft AI - AI-Powered Test & Exam Generator Platform",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "server": "cd server && node index.js",
+    "client": "cd client && npm run dev",
+    "build": "cd client && npm run build",
+    "start": "cd server && node index.js",
+    "dev": "echo \"Run 'npm run server' in one terminal and 'npm run client' in another terminal.\""
+  }
+}
