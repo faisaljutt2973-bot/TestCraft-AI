@@ -9,7 +9,7 @@ const STORE_PATH = path.join(DATA_DIR, 'store.json');
 const SETTINGS_ID = 'global';
 
 // Ensure data directory exists
-if (!fs.existsSync(DATA_DIR)) {
+if (!process.env.TESTCRAFT_SERVERLESS && !fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
 }
 
@@ -267,6 +267,8 @@ const mongoBackend = {
 // All methods are async so callers can use either backend transparently.
 // ---------------------------------------------------------------------------
 const Storage = {
+  defaultSettings: defaultStore.settings,
+  STORE_PATH,
   isMongo() {
     return isMongoReady();
   },
@@ -308,7 +310,14 @@ const Storage = {
   },
 };
 
-Storage.STORE_PATH = STORE_PATH;
-Storage.defaultSettings = defaultStore.settings;
 
+if (process.env.TESTCRAFT_SERVERLESS) {
+  // Keep the existing async storage contract while persisting each record in Postgres.
+  for (const method of ['find', 'findOne', 'findById', 'create', 'update', 'delete', 'count', 'getSettings', 'updateSettings']) {
+    Storage[method] = async (...args) => {
+      const { databaseStorage } = await import('./netlifyStorage.ts');
+      return databaseStorage[method](...args);
+    };
+  }
+}
 module.exports = Storage;

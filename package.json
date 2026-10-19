@@ -10,6 +10,19 @@
     "client": "cd client && npm run dev",
     "build": "cd client && npm run build",
     "start": "cd server && node index.js",
-    "dev": "echo \"Run 'npm run server' in one terminal and 'npm run client' in another terminal.\""
+    "dev": "echo \"Run 'npm run server' in one terminal and 'npm run client' in another terminal.\"",
+    "postinstall": "npm ci --prefix client --include=dev && npm ci --prefix server --omit=dev"
+  },
+  "dependencies": {
+    "@netlify/blobs": "^11.1.4",
+    "@netlify/database": "^2.0.1",
+    "@netlify/functions": "^6.0.2",
+    "drizzle-orm": "^1.0.0-beta.22",
+    "serverless-http": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "drizzle-kit": "^1.0.0-beta.22",
+    "typescript": "^7.0.2"
   }
 }

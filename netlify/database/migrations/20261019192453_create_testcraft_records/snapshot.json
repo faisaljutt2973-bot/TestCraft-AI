@@ -1,0 +1,67 @@
+{
+  "version": "8",
+  "dialect": "postgres",
+  "id": "f4b4c194-cd26-4c0c-84ce-d1881e1ac972",
+  "prevIds": [
+    "00000000-0000-0000-0000-000000000000"
+  ],
+  "ddl": [
+    {
+      "isRlsEnabled": false,
+      "name": "testcraft_records",
+      "entityType": "tables",
+      "schema": "public"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "collection",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "testcraft_records"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "testcraft_records"
+    },
+    {
+      "type": "jsonb",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "data",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "testcraft_records"
+    },
+    {
+      "columns": [
+        "collection",
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "testcraft_records_pkey",
+      "entityType": "pks",
+      "schema": "public",
+      "table": "testcraft_records"
+    }
+  ],
+  "renames": []
+}

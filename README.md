@@ -190,6 +190,33 @@ The optimized bundle and static SEO assets (`robots.txt`, `sitemap.xml`) are emi
 
 ## 🚀 Deployment
 
+### Netlify
+
+The repository's `netlify.toml` configures `npm run build`, publishes `client/dist`,
+and deploys the Express API as a Netlify Function. These settings replace the old
+`make all`, `public`, and `my-functions` settings. The root postinstall script installs both client and server dependencies from
+their lockfiles without exposing multiple workspace deployment targets.
+
+API requests and authenticated file downloads are routed before the React page
+fallback, so `/api/*` returns JSON and refreshing an application URL serves the app.
+The standalone Express server remains available through `npm start`.
+
+On Netlify, application records use Netlify Database through Drizzle. The schema
+is defined in `db/schema.ts`; generated migrations in `netlify/database/migrations`
+are applied by Netlify during deployment. Database errors are surfaced rather
+than falling back to a temporary JSON file. Existing MongoDB/local data is not
+imported automatically.
+
+Uploaded textbook originals use Netlify Blobs. Parsing uses temporary files that
+are removed after each request. Netlify uploads are capped at 4 MB to stay below
+the function's request size limit, including multipart and encoding overhead.
+
+Configure `JWT_SECRET` in Netlify's runtime environment for the existing login
+system. Configure SMTP variables for password reset email delivery. Production
+demo accounts are disabled by default. `VITE_SITE_URL` controls public SEO URLs;
+set it to the deployed origin if using a different domain.
+
+
 ### Single-origin (recommended)
 The Express server automatically serves `client/dist` when it exists, so one Node process can host both the API and the app:
 
