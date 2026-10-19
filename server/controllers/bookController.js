@@ -122,6 +122,13 @@ const uploadBookFile = async (req, res) => {
 
     const fallbackTitle = path.basename(req.file.originalname, path.extname(req.file.originalname)).replace(/[-_]/g, ' ');
 
+    let storedPath = req.file.path;
+    if (process.env.TESTCRAFT_SERVERLESS) {
+      const { getStore } = await import('@netlify/blobs');
+      storedPath = `blobs:${req.file.filename}`;
+      await getStore('textbook-uploads').set(req.file.filename, fs.readFileSync(req.file.path));
+    }
+
     const newBook = await Storage.create('books', {
       title: (title || fallbackTitle).trim(),
       author: (author || 'Extracted from Document').trim(),
@@ -130,7 +137,7 @@ const uploadBookFile = async (req, res) => {
       subject: subject || 'General Science',
       sourceType: 'uploaded_document',
       originalFilename: req.file.originalname,
-      filePath: req.file.path,
+      filePath: storedPath,
       fileSize: req.file.size,
       pageCount: parsedData.pageCount,
       extractedCharCount: parsedData.text.length,
@@ -148,6 +155,10 @@ const uploadBookFile = async (req, res) => {
   } catch (err) {
     console.error('[Parser] Upload error:', err);
     res.status(500).json({ success: false, message: `Failed to parse file: ${err.message}` });
+  } finally {
+    if (process.env.TESTCRAFT_SERVERLESS && req.file?.path) {
+      await fs.promises.unlink(req.file.path).catch(() => {});
+    }
   }
 };
 
@@ -251,6 +262,10 @@ const deleteBook = async (req, res) => {
       return res.status(403).json({ success: false, message: 'You do not have permission to delete this book.' });
     }
 
+    if (book.filePath?.startsWith('blobs:')) {
+      const { getStore } = await import('@netlify/blobs');
+      await getStore('textbook-uploads').delete(book.filePath.slice(6));
+    }
     if (book.filePath && fs.existsSync(book.filePath)) {
       try {
         fs.unlinkSync(book.filePath);

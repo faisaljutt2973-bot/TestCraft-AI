@@ -2,7 +2,9 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 
-const UPLOADS_DIR = path.join(__dirname, '../uploads');
+const UPLOADS_DIR = process.env.TESTCRAFT_SERVERLESS
+  ? path.join(require('os').tmpdir(), 'testcraft-uploads')
+  : path.join(__dirname, '../uploads');
 if (!fs.existsSync(UPLOADS_DIR)) {
   fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 }
@@ -28,7 +30,8 @@ const fileFilter = (req, file, cb) => {
   }
 };
 
-const maxMb = parseInt(process.env.UPLOAD_MAX_SIZE_MB, 10) || 50;
+const configuredMaxMb = parseInt(process.env.UPLOAD_MAX_SIZE_MB, 10) || 50;
+const maxMb = process.env.TESTCRAFT_SERVERLESS ? Math.min(configuredMaxMb, 4) : configuredMaxMb;
 
 const upload = multer({
   storage,

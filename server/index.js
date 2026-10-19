@@ -86,7 +86,25 @@ app.use('/api/auth/forgot-password', authLimiter);
 app.use('/api/auth/reset-password', authLimiter);
 
 // Static uploads directory (authenticated users only)
-app.use('/uploads', authenticate, express.static(path.join(__dirname, 'uploads')));
+if (process.env.TESTCRAFT_SERVERLESS) {
+  app.get('/uploads/:filename', authenticate, async (req, res, next) => {
+    try {
+      const Storage = require('./config/storage');
+      const book = await Storage.findOne('books', { filePath: `blobs:${req.params.filename}` });
+      if (!book || (book.isPublic === false && book.createdBy !== req.user.id && req.user.role !== 'admin')) {
+        return res.status(404).json({ success: false, message: 'File not found.' });
+      }
+      const { getStore } = await import('@netlify/blobs');
+      const file = await getStore('textbook-uploads').get(req.params.filename, { type: 'arrayBuffer' });
+      if (!file) return res.status(404).json({ success: false, message: 'File not found.' });
+      res.attachment(book.originalFilename).send(Buffer.from(file));
+    } catch (err) {
+      next(err);
+    }
+  });
+} else {
+  app.use('/uploads', authenticate, express.static(path.join(__dirname, 'uploads')));
+}
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
@@ -154,26 +172,19 @@ const warnProductionConfig = () => {
   }
 };
 
-// Initialize Database & Seed Sample Data before accepting requests
-(async () => {
-  await connectDB();
-  await seedDefaultData();
-
-  app.listen(PORT, () => {
-    console.log(`=======================================================`);
-    console.log(`   TestCraft AI Server running on http://localhost:${PORT}`);
-    console.log(`   Health Check: http://localhost:${PORT}/api/health`);
-    if (hasClientBuild) {
-      console.log(`   Serving client build from ${clientDist}`);
-    } else {
-      console.log(`   Client build not found - run the Vite dev server separately.`);
-    }
-    console.log(`=======================================================`);
-    warnProductionConfig();
+// A serverless import must not start a listening HTTP server or exit the worker.
+if (require.main === module) {
+  (async () => {
+    await connectDB();
+    await seedDefaultData();
+    app.listen(PORT, () => {
+      console.log(`TestCraft AI server listening on port ${PORT}`);
+      warnProductionConfig();
+    });
+  })().catch(() => {
+    console.error('[Startup Error] Server initialization failed.');
+    process.exitCode = 1;
   });
-})().catch((err) => {
-  console.error('[Startup Error]', err);
-  process.exit(1);
-});
+}
 
 module.exports = app;
