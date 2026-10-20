@@ -199,8 +199,8 @@ export const TestGenerator = ({ preselectedBook, preselectedChapters, preselecte
   return (
     <div className="max-w-4xl mx-auto space-y-6">
       {/* Wizard Step Progress Indicator */}
-      <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
-        <div className="flex items-center justify-between">
+      <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm overflow-x-auto">
+        <div className="flex items-center justify-between gap-1 sm:gap-2">
           {[
             { num: 1, label: 'Syllabus' },
             { num: 2, label: 'Exam Type' },
@@ -221,10 +221,10 @@ export const TestGenerator = ({ preselectedBook, preselectedChapters, preselecte
               >
                 {step > s.num ? <Check className="w-4 h-4" /> : s.num}
               </div>
-              <span className={`text-xs font-semibold hidden md:inline ${step === s.num ? 'text-brand-900' : 'text-slate-500'}`}>
+              <span className={`text-xs font-semibold hidden xl:inline whitespace-nowrap ${step === s.num ? 'text-brand-900' : 'text-slate-500'}`}>
                 {s.label}
               </span>
-              {s.num < 6 && <div className="hidden sm:block w-8 lg:w-12 h-0.5 bg-slate-200 mx-1" />}
+              {s.num < 6 && <div className="hidden sm:block w-6 lg:w-10 h-0.5 bg-slate-200 mx-0.5" />}
             </div>
           ))}
         </div>

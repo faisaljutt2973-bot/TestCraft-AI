@@ -173,7 +173,7 @@ export const TestEditor = ({ testId, onBack }) => {
     <div className="space-y-6">
       {/* Action Header - Hidden during print */}
       <div className="no-print bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 min-w-0">
           <button
             onClick={onBack}
             className="p-2 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-xl transition-colors"
@@ -181,8 +181,8 @@ export const TestEditor = ({ testId, onBack }) => {
           >
             <ArrowLeft className="w-4 h-4" />
           </button>
-          <div>
-            <h2 className="text-base font-extrabold text-slate-900 leading-tight">{test.title}</h2>
+          <div className="min-w-0">
+            <h2 className="text-base font-extrabold text-slate-900 leading-tight break-words">{test.title}</h2>
             <p className="text-xs text-slate-500">
               {test.className} • {test.subject} • Total Marks: {test.totalMarks} ({test.durationMinutes} Mins)
             </p>
@@ -249,7 +249,7 @@ export const TestEditor = ({ testId, onBack }) => {
       </div>
 
       {/* PRINTABLE ASSESSMENT PAPER CONTAINER */}
-      <div className="printable-paper bg-white rounded-2xl border border-slate-200 shadow-lg p-8 sm:p-12 max-w-4xl mx-auto font-serif">
+      <div className="printable-paper bg-white rounded-2xl border border-slate-200 shadow-lg p-4 sm:p-8 lg:p-12 max-w-4xl mx-auto font-serif">
         {/* Institutional Header */}
         <div className="text-center border-b-2 border-slate-900 pb-4 mb-5">
           <h1 className="text-xl sm:text-2xl font-black uppercase tracking-wide text-slate-950 font-sans">

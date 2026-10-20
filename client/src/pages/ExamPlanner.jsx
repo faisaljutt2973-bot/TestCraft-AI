@@ -418,7 +418,7 @@ export const ExamPlanner = ({ onStartPlannerExam, onOpenAddBook }) => {
                   )}
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <button
                     onClick={() => setAssessmentType('midterm')}
                     className={`p-3 rounded-xl border text-left transition-all ${

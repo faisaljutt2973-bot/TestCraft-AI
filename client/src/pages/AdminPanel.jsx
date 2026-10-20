@@ -271,10 +271,10 @@ export const AdminPanel = ({ onMakeTest }) => {
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-2 bg-white p-1.5 rounded-2xl border border-slate-200 shadow-sm w-fit">
+      <div className="flex gap-1.5 bg-white p-1.5 rounded-2xl border border-slate-200 shadow-sm w-full sm:w-fit overflow-x-auto">
         <button
           onClick={() => setTab('books')}
-          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+          className={`flex items-center gap-2 flex-shrink-0 px-3 sm:px-4 py-2 rounded-xl text-xs font-bold transition-all ${
             tab === 'books' ? 'bg-brand-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50'
           }`}
         >
@@ -283,7 +283,7 @@ export const AdminPanel = ({ onMakeTest }) => {
         </button>
         <button
           onClick={() => setTab('users')}
-          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+          className={`flex items-center gap-2 flex-shrink-0 px-3 sm:px-4 py-2 rounded-xl text-xs font-bold transition-all ${
             tab === 'users' ? 'bg-brand-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50'
           }`}
         >
@@ -292,7 +292,7 @@ export const AdminPanel = ({ onMakeTest }) => {
         </button>
         <button
           onClick={() => setTab('support')}
-          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+          className={`flex items-center gap-2 flex-shrink-0 px-3 sm:px-4 py-2 rounded-xl text-xs font-bold transition-all ${
             tab === 'support' ? 'bg-brand-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50'
           }`}
         >

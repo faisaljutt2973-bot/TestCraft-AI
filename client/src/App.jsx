@@ -25,6 +25,7 @@ const MainApp = () => {
   const [resetToken, setResetToken] = useState(initialResetToken);
   const [activeTab, setActiveTab] = useState('dashboard');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [preselectedConfig, setPreselectedConfig] = useState({});
 
   // Deep view states
@@ -147,6 +148,7 @@ const MainApp = () => {
           activeTab={activeTab === 'book-detail' ? 'books' : activeTab === 'editor' ? 'tests' : activeTab}
           setActiveTab={(tab) => {
             setActiveTab(tab);
+            setIsMobileSidebarOpen(false);
             setSelectedBookId(null);
             setPreselectedBook(null);
             setPreselectedChapters([]);
@@ -154,12 +156,14 @@ const MainApp = () => {
           }}
           isCollapsed={isSidebarCollapsed}
           setIsCollapsed={setIsSidebarCollapsed}
+          isMobileOpen={isMobileSidebarOpen}
+          onClose={() => setIsMobileSidebarOpen(false)}
         />
       </div>
 
       {/* Main Content Area */}
       <div
-        className={`flex-1 flex flex-col min-h-screen transition-all duration-300 ease-in-out ${
+        className={`flex-1 flex flex-col min-h-screen min-w-0 w-full transition-all duration-300 ease-in-out ${
           isSidebarCollapsed ? 'md:ml-20' : 'md:ml-64'
         }`}
       >
@@ -168,11 +172,11 @@ const MainApp = () => {
             activeTab={activeTab}
             onQuickNewTest={handleQuickNewTest}
             onQuickAddBook={handleQuickAddBook}
-            isCollapsed={isSidebarCollapsed}
+            onOpenSidebar={() => setIsMobileSidebarOpen(true)}
           />
         </div>
 
-        <main className="flex-1 p-6 max-w-7xl w-full mx-auto">
+        <main className="flex-1 p-4 sm:p-6 max-w-7xl w-full mx-auto min-w-0">
           {activeTab === 'dashboard' && (
             <Dashboard
               setActiveTab={setActiveTab}

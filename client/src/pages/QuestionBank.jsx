@@ -127,7 +127,7 @@ export const QuestionBank = () => {
           />
         </div>
 
-        <div className="flex items-center gap-2.5">
+        <div className="flex flex-wrap items-center gap-2.5">
           <select
             value={filterType}
             onChange={(e) => setFilterType(e.target.value)}
@@ -287,7 +287,7 @@ export const QuestionBank = () => {
         maxWidth="max-w-2xl"
       >
         <form onSubmit={handleCreateQuestion} className="space-y-4">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1">Subject *</label>
               <input
