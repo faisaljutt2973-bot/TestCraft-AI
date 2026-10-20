@@ -18,9 +18,11 @@ import {
   Layers,
 } from 'lucide-react';
 import { api } from '../services/api';
+import { useAuth } from '../context/AuthContext';
 import { Modal } from '../components/Modal';
 
 export const TestEditor = ({ testId, onBack }) => {
+  const { user } = useAuth();
   const [test, setTest] = useState(null);
   const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState('student'); // 'student' | 'answer-key'
@@ -57,8 +59,12 @@ export const TestEditor = ({ testId, onBack }) => {
     window.print();
   };
 
-  const handleDownloadDocx = () => {
-    window.open(api.getExportUrl(testId, viewMode, 'docx'), '_blank');
+  const handleDownloadDocx = async () => {
+    try {
+      await api.downloadExport(testId, viewMode, 'docx');
+    } catch (err) {
+      alert(`Download failed: ${err.message}`);
+    }
   };
 
   const handleRegenerateSingleQuestion = async (sectionId, questionId) => {
@@ -253,7 +259,7 @@ export const TestEditor = ({ testId, onBack }) => {
         {/* Institutional Header */}
         <div className="text-center border-b-2 border-slate-900 pb-4 mb-5">
           <h1 className="text-xl sm:text-2xl font-black uppercase tracking-wide text-slate-950 font-sans">
-            {test.schoolName || 'BEACONHOUSE SCHOOL SYSTEM'}
+            {test.schoolName || user?.school || 'EXAMINATION PAPER'}
           </h1>
           <h2 className="text-sm sm:text-base font-bold text-slate-800 underline decoration-slate-400 mt-1 uppercase font-sans">
             {test.examinationHeading || test.title}

@@ -4,7 +4,35 @@ const Storage = require('../config/storage');
 const { generateExamPaper } = require('../services/aiService');
 const { generateStudentPaperHTML, generateAnswerKeyHTML } = require('../services/exportService');
 
+const MAX_QUESTIONS_PER_PAPER = 150;
+const MAX_TOTAL_MARKS = 1000;
+const DUPLICATE_WINDOW_MS = 60 * 1000;
+
+// Per-process guards. They stop double-taps/duplicate retries from creating
+// two identical papers; the database remains the source of truth.
+const inFlightGenerations = new Map();
+const recentGenerationResults = new Map();
+
+const sanitizeText = (value, maxLength = 160) =>
+  typeof value === 'string'
+    ? value
+        .replace(/[\u0000-\u001f\u007f]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, maxLength)
+    : '';
+
+const storeGenerationResult = (key, payload) => {
+  const now = Date.now();
+  for (const [storedKey, entry] of recentGenerationResults) {
+    if (entry.expiresAt <= now) recentGenerationResults.delete(storedKey);
+  }
+  recentGenerationResults.set(key, { payload, expiresAt: now + DUPLICATE_WINDOW_MS });
+};
+
 const generateTest = async (req, res) => {
+  const userId = req.user.id;
+
   try {
     const {
       title,
@@ -27,23 +55,29 @@ const generateTest = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Please select a textbook or syllabus source.' });
     }
 
-    const book = await Storage.findById('books', bookId);
-    if (!book) {
-      return res.status(404).json({ success: false, message: 'Selected book could not be found.' });
-    }
-
-    if (!selectedChapters || selectedChapters.length === 0) {
+    const chapters = Array.isArray(selectedChapters)
+      ? [...new Set(selectedChapters.map((chapter) => String(chapter)))]
+      : [];
+    if (chapters.length === 0) {
       return res.status(400).json({ success: false, message: 'Please select at least one chapter or unit.' });
     }
 
-    // Validate marks balance
     const defaultWeights = { mcq: 1, short_answer: 4, long_answer: 10, fill_blanks: 1, true_false: 1, numerical: 5 };
-    const effectiveMarksPerType = { ...defaultWeights, ...marksPerQuestion };
+    const effectiveMarksPerType = { ...defaultWeights };
+    for (const [type, marks] of Object.entries(marksPerQuestion || {})) {
+      const parsed = parseInt(marks, 10);
+      if (Number.isFinite(parsed) && parsed > 0 && parsed <= 50) {
+        effectiveMarksPerType[type] = parsed;
+      }
+    }
 
+    const normalizedCounts = {};
     let totalAllocatedMarks = 0;
     let totalQuestionsCount = 0;
-    for (const [type, count] of Object.entries(questionTypeCounts)) {
-      const qCount = parseInt(count, 10) || 0;
+    for (const [type, rawCount] of Object.entries(questionTypeCounts || {})) {
+      const qCount = Math.min(Math.max(parseInt(rawCount, 10) || 0, 0), 50);
+      if (qCount === 0) continue;
+      normalizedCounts[type] = qCount;
       totalQuestionsCount += qCount;
       totalAllocatedMarks += qCount * (effectiveMarksPerType[type] || 1);
     }
@@ -55,7 +89,18 @@ const generateTest = async (req, res) => {
       });
     }
 
+    if (totalQuestionsCount > MAX_QUESTIONS_PER_PAPER) {
+      return res.status(400).json({
+        success: false,
+        message: `A single paper cannot contain more than ${MAX_QUESTIONS_PER_PAPER} questions.`,
+      });
+    }
+
     const targetTotal = parseInt(totalMarks, 10);
+    if (!Number.isFinite(targetTotal) || targetTotal <= 0 || targetTotal > MAX_TOTAL_MARKS) {
+      return res.status(400).json({ success: false, message: `Total marks must be between 1 and ${MAX_TOTAL_MARKS}.` });
+    }
+
     if (totalAllocatedMarks !== targetTotal) {
       return res.status(400).json({
         success: false,
@@ -65,60 +110,161 @@ const generateTest = async (req, res) => {
       });
     }
 
-    const settings = await Storage.getSettings();
+    const book = await Storage.findById('books', bookId);
+    if (!book) {
+      return res.status(404).json({ success: false, message: 'Selected book could not be found.' });
+    }
+    if (book.isPublic === false && book.createdBy !== userId && req.user.role !== 'admin') {
+      return res.status(404).json({ success: false, message: 'Selected book could not be found.' });
+    }
 
-    // Call AI Generation Engine
-    console.log(`[Test Generator] Generating ${examType} for "${book.title}", ${totalQuestionsCount} questions, ${targetTotal} marks...`);
-    const generated = await generateExamPaper({
-      book,
-      selectedChapters,
-      examConfig: {
-        examType,
-        totalMarks: targetTotal,
+    const resolvedExamType = sanitizeText(examType, 80) || 'Chapter-wise test';
+    const fingerprint = crypto
+      .createHash('sha256')
+      .update(
+        JSON.stringify({
+          userId,
+          bookId,
+          chapters: [...chapters].sort(),
+          counts: normalizedCounts,
+          marks: effectiveMarksPerType,
+          targetTotal,
+          resolvedExamType,
+          title: sanitizeText(title, 180),
+          difficulty: sanitizeText(difficulty, 40),
+          language: sanitizeText(language, 40),
+          durationMinutes: parseInt(durationMinutes, 10) || 90,
+          passingMarks: parseInt(passingMarks, 10) || null,
+          schoolName: sanitizeText(schoolName, 120) || sanitizeText(req.user.school, 120),
+          examinationHeading: sanitizeText(examinationHeading, 160),
+          instructions: Array.isArray(instructions) ? instructions.map(String).slice(0, 20) : [],
+        })
+      )
+      .digest('hex');
+
+    const idempotencyKey = sanitizeText(req.get('Idempotency-Key'), 120);
+    const idempotencyCacheKey = idempotencyKey ? `idem:${userId}:${idempotencyKey}` : null;
+
+    for (const key of [fingerprint, idempotencyCacheKey].filter(Boolean)) {
+      const cached = recentGenerationResults.get(key);
+      if (cached && cached.expiresAt > Date.now()) {
+        return res.status(200).json({
+          ...cached.payload,
+          duplicate: true,
+          message: 'This paper was already generated a moment ago. Opening the existing copy.',
+        });
+      }
+    }
+
+    if (inFlightGenerations.has(userId)) {
+      return res.status(409).json({
+        success: false,
+        code: 'GENERATION_IN_PROGRESS',
+        message: 'A test paper is already being generated. Please wait for it to finish before starting another.',
+      });
+    }
+
+    inFlightGenerations.set(userId, Date.now());
+    try {
+      const settings = await Storage.getSettings();
+      const resolvedSchoolName =
+        sanitizeText(schoolName, 120) ||
+        sanitizeText(req.user.school, 120) ||
+        sanitizeText(settings.schoolName, 120) ||
+        'Academic Institution';
+
+      console.log(
+        `[Test Generator] User ${userId} generating ${resolvedExamType} for "${book.title}", ${totalQuestionsCount} questions, ${targetTotal} marks...`
+      );
+
+      const generated = await generateExamPaper({
+        book,
+        selectedChapters: chapters,
+        examConfig: {
+          examType: resolvedExamType,
+          totalMarks: targetTotal,
+          difficulty,
+          marksPerQuestion: effectiveMarksPerType,
+        },
+        questionTypeCounts: normalizedCounts,
+        settings,
+      });
+
+      const defaultInstructions = [
+        'Read all questions carefully before attempting.',
+        'Write answers neatly in the designated answer booklet.',
+        'Check all calculations and specify units clearly.',
+        'Ensure your name, roll number, and date are filled on the title page.',
+      ];
+
+      const parsedDuration = Math.min(Math.max(parseInt(durationMinutes, 10) || 90, 10), 600);
+      const parsedPassing = parseInt(passingMarks, 10);
+
+      const newTestPaper = await Storage.create('testPapers', {
+        title: sanitizeText(title, 180) || `${book.className} ${book.subject} - ${resolvedExamType}`,
+        schoolName: resolvedSchoolName,
+        examinationHeading: sanitizeText(examinationHeading, 160) || `${resolvedExamType.toUpperCase()} - 2026`,
+        subject: book.subject,
+        className: book.className,
+        boardName: book.boardName || 'National Board',
+        bookId: book.id,
+        bookTitle: book.title,
+        examType: resolvedExamType,
+        durationMinutes: parsedDuration,
+        totalMarks: generated.totalMarks,
+        passingMarks:
+          Number.isFinite(parsedPassing) && parsedPassing > 0
+            ? Math.min(parsedPassing, generated.totalMarks)
+            : Math.round(generated.totalMarks * 0.4),
         difficulty,
-        marksPerQuestion: effectiveMarksPerType,
-      },
-      questionTypeCounts,
-      settings,
-    });
+        language,
+        selectedChapters: chapters,
+        instructions: Array.isArray(instructions) && instructions.length > 0 ? instructions : defaultInstructions,
+        sections: generated.sections,
+        createdBy: userId,
+        generatedAt: new Date().toISOString(),
+      });
 
-    const defaultInstructions = [
-      'Read all questions carefully before attempting.',
-      'Write answers neatly in the designated answer booklet.',
-      'Check all calculations and specify units clearly.',
-      'Ensure your name, roll number, and date are filled on the title page.',
-    ];
+      const payload = {
+        success: true,
+        message: `Examination paper successfully generated with ${generated.generatedQuestionsCount} syllabus-grounded questions.`,
+        testPaper: newTestPaper,
+      };
 
-    const newTestPaper = await Storage.create('testPapers', {
-      title: title || `${book.className} ${book.subject} - ${examType}`,
-      schoolName: schoolName || settings.schoolName || 'Beacon International Academy',
-      examinationHeading: examinationHeading || `${examType.toUpperCase()} - 2026`,
-      subject: book.subject,
-      className: book.className,
-      boardName: book.boardName || 'National Board',
-      bookId: book.id,
-      bookTitle: book.title,
-      examType,
-      durationMinutes: parseInt(durationMinutes, 10) || 90,
-      totalMarks: generated.totalMarks,
-      passingMarks: passingMarks ? parseInt(passingMarks, 10) : Math.round(generated.totalMarks * 0.4),
-      difficulty,
-      language,
-      selectedChapters,
-      instructions: instructions && instructions.length > 0 ? instructions : defaultInstructions,
-      sections: generated.sections,
-      createdBy: req.user.id,
-      generatedAt: new Date().toISOString(),
-    });
+      storeGenerationResult(fingerprint, payload);
+      if (idempotencyCacheKey) storeGenerationResult(idempotencyCacheKey, payload);
 
-    res.status(201).json({
-      success: true,
-      message: `Examination paper successfully generated with ${generated.generatedQuestionsCount} syllabus-grounded questions.`,
-      testPaper: newTestPaper,
-    });
+      return res.status(201).json(payload);
+    } finally {
+      inFlightGenerations.delete(userId);
+    }
   } catch (err) {
     console.error('[Test Generator] Generation failed:', err);
-    res.status(500).json({ success: false, message: `Failed to generate test: ${err.message}` });
+    const message = String(err.message || '');
+    const databaseFailure = /buffering timed out|Mongo(?:DB|ose)?|topology|connection .*closed|ECONN|socket hang up/i.test(
+      message
+    );
+
+    if (databaseFailure) {
+      return res.status(503).json({
+        success: false,
+        code: 'DATABASE_UNAVAILABLE',
+        message: 'The database is temporarily unavailable. Please try again in a moment.',
+      });
+    }
+
+    if (err.status && err.status < 500) {
+      return res.status(err.status).json({ success: false, message: err.message });
+    }
+
+    return res.status(500).json({
+      success: false,
+      code: 'GENERATION_FAILED',
+      message:
+        process.env.NODE_ENV === 'production'
+          ? 'The test paper could not be generated. Please try again.'
+          : `Failed to generate test: ${message}`,
+    });
   }
 };
 
@@ -200,6 +346,10 @@ const regenerateQuestion = async (req, res) => {
     const test = await Storage.findById('testPapers', req.params.id);
     if (!test) {
       return res.status(404).json({ success: false, message: 'Test paper not found.' });
+    }
+
+    if (test.createdBy !== req.user.id && req.user.role !== 'admin') {
+      return res.status(403).json({ success: false, message: 'You do not have permission to edit this exam paper.' });
     }
 
     const { sectionId, questionId } = req.body;
@@ -289,6 +439,10 @@ const exportTest = async (req, res) => {
     const test = await Storage.findById('testPapers', req.params.id);
     if (!test) {
       return res.status(404).json({ success: false, message: 'Test paper not found.' });
+    }
+
+    if (test.createdBy !== req.user.id && req.user.role !== 'admin') {
+      return res.status(403).json({ success: false, message: 'You do not have permission to export this exam paper.' });
     }
 
     const { type = 'student', format = 'html' } = req.query;

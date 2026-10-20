@@ -3,8 +3,18 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const Storage = require('../config/storage');
 const { sendMail, getClientUrl } = require('../services/emailService');
+const { invalidateUser } = require('../middleware/auth');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'testcraft_jwt_super_secret_key_change_in_production';
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+
+const escapeHtml = (value) =>
+  String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 
 const generateToken = (userId, role) => {
   return jwt.sign({ id: userId, role }, JWT_SECRET, { expiresIn: '7d' });
@@ -26,11 +36,25 @@ const register = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Please provide full name, email, and password.' });
     }
 
+    const normalizedName = String(name).trim().replace(/\s+/g, ' ').slice(0, 100);
+    const normalizedEmail = String(email).toLowerCase().trim();
+    const normalizedSchool = typeof school === 'string' ? school.trim().replace(/\s+/g, ' ').slice(0, 120) : '';
+
+    if (!normalizedName) {
+      return res.status(400).json({ success: false, message: 'Please enter your full name.' });
+    }
+    if (!EMAIL_PATTERN.test(normalizedEmail)) {
+      return res.status(400).json({ success: false, message: 'Please enter a valid email address.' });
+    }
+    if (!normalizedSchool) {
+      return res.status(400).json({ success: false, message: 'Please enter your school or institution name.' });
+    }
+
     if (String(password).length < 8) {
       return res.status(400).json({ success: false, message: 'Password must be at least 8 characters.' });
     }
 
-    const existingUser = await Storage.findOne('users', { email: email.toLowerCase().trim() });
+    const existingUser = await Storage.findOne('users', { email: normalizedEmail });
     if (existingUser) {
       return res.status(400).json({ success: false, message: 'An account with this email already exists.' });
     }
@@ -39,11 +63,11 @@ const register = async (req, res) => {
     const hashedPassword = await bcrypt.hash(password, salt);
 
     const user = await Storage.create('users', {
-      name: name.trim(),
-      email: email.toLowerCase().trim(),
+      name: normalizedName,
+      email: normalizedEmail,
       password: hashedPassword,
       role: 'teacher',
-      school: school ? school.trim() : 'General Secondary School',
+      school: normalizedSchool,
       subjectSpecialties: Array.isArray(subjectSpecialties) ? subjectSpecialties : ['General Science'],
       phone: '',
       bio: '',
@@ -119,15 +143,26 @@ const updateProfile = async (req, res) => {
     const updates = {};
 
     if (name !== undefined) {
-      if (!name.trim()) {
+      const normalizedName = typeof name === 'string' ? name.trim().replace(/\s+/g, ' ') : '';
+      if (!normalizedName) {
         return res.status(400).json({ success: false, message: 'Name cannot be empty.' });
       }
-      updates.name = name.trim();
+      updates.name = normalizedName.slice(0, 100);
     }
 
-    if (school !== undefined) updates.school = school.trim();
-    if (phone !== undefined) updates.phone = phone.trim();
-    if (bio !== undefined) updates.bio = bio.trim();
+    if (school !== undefined) {
+      const normalizedSchool = typeof school === 'string' ? school.trim().replace(/\s+/g, ' ') : '';
+      if (!normalizedSchool) {
+        return res.status(400).json({ success: false, message: 'School or institution name cannot be empty.' });
+      }
+      if (normalizedSchool.length > 120) {
+        return res.status(400).json({ success: false, message: 'School name must be 120 characters or fewer.' });
+      }
+      updates.school = normalizedSchool;
+    }
+
+    if (phone !== undefined) updates.phone = typeof phone === 'string' ? phone.trim().slice(0, 30) : '';
+    if (bio !== undefined) updates.bio = typeof bio === 'string' ? bio.trim().slice(0, 500) : '';
 
     if (subjectSpecialties !== undefined) {
       updates.subjectSpecialties = Array.isArray(subjectSpecialties)
@@ -147,8 +182,8 @@ const updateProfile = async (req, res) => {
 
     if (email !== undefined) {
       const normalized = String(email).toLowerCase().trim();
-      if (!normalized) {
-        return res.status(400).json({ success: false, message: 'Email cannot be empty.' });
+      if (!EMAIL_PATTERN.test(normalized)) {
+        return res.status(400).json({ success: false, message: 'Please enter a valid email address.' });
       }
       if (normalized !== user.email) {
         const existing = await Storage.findOne('users', { email: normalized });
@@ -179,6 +214,7 @@ const updateProfile = async (req, res) => {
     }
 
     const updated = await Storage.update('users', req.user.id, updates);
+    invalidateUser(req.user.id);
     res.json({ success: true, message: 'Profile updated successfully.', user: sanitizeUser(updated) });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -206,12 +242,13 @@ const forgotPassword = async (req, res) => {
       resetPasswordExpires: Date.now() + 60 * 60 * 1000,
     });
 
-    const resetUrl = `${getClientUrl()}/?resetToken=${token}`;
+    const resetUrl = `${getClientUrl()}/?resetToken=${encodeURIComponent(token)}`;
+    const safeName = escapeHtml(user.name);
     const result = await sendMail({
       to: user.email,
       subject: 'Reset your TestCraft AI password',
       text: `Hello ${user.name},\n\nA password reset was requested for your TestCraft AI account.\n\nReset your password here: ${resetUrl}\n\nThis link expires in 1 hour. If you did not request this, you can ignore this email.`,
-      html: `<p>Hello ${user.name},</p><p>A password reset was requested for your TestCraft AI account.</p><p><a href="${resetUrl}">Reset your password</a></p><p>This link expires in 1 hour. If you did not request this, you can ignore this email.</p>`,
+      html: `<p>Hello ${safeName},</p><p>A password reset was requested for your TestCraft AI account.</p><p><a href="${resetUrl}">Reset your password</a></p><p>This link expires in 1 hour. If you did not request this, you can ignore this email.</p>`,
     });
 
     const payload = {
@@ -258,6 +295,7 @@ const resetPassword = async (req, res) => {
       resetPasswordToken: null,
       resetPasswordExpires: null,
     });
+    invalidateUser(user.id);
 
     res.json({ success: true, message: 'Password reset successfully. You can now sign in with your new password.' });
   } catch (err) {
@@ -312,6 +350,7 @@ const updateUserRole = async (req, res) => {
     }
 
     const updated = await Storage.update('users', targetId, updates);
+    invalidateUser(targetId);
     res.json({ success: true, message: `User updated to role ${updated.role}.`, user: sanitizeUser(updated) });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -331,6 +370,7 @@ const deleteUser = async (req, res) => {
     }
 
     await Storage.delete('users', targetId);
+    invalidateUser(targetId);
     res.json({ success: true, message: `Account for ${user.name} has been removed.` });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -345,11 +385,19 @@ const createUserByAdmin = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Name, email, and password are required.' });
     }
 
+    const normalizedName = String(name).trim().replace(/\s+/g, ' ').slice(0, 100);
+    const normalizedEmail = String(email).toLowerCase().trim();
+    const normalizedSchool = typeof school === 'string' ? school.trim().replace(/\s+/g, ' ').slice(0, 120) : '';
+
+    if (!EMAIL_PATTERN.test(normalizedEmail)) {
+      return res.status(400).json({ success: false, message: 'Please enter a valid email address.' });
+    }
+
     if (String(password).length < 8) {
       return res.status(400).json({ success: false, message: 'Password must be at least 8 characters.' });
     }
 
-    const existingUser = await Storage.findOne('users', { email: email.toLowerCase().trim() });
+    const existingUser = await Storage.findOne('users', { email: normalizedEmail });
     if (existingUser) {
       return res.status(400).json({ success: false, message: 'An account with this email already exists.' });
     }
@@ -358,11 +406,11 @@ const createUserByAdmin = async (req, res) => {
     const hashedPassword = await bcrypt.hash(password, salt);
 
     const user = await Storage.create('users', {
-      name: name.trim(),
-      email: email.toLowerCase().trim(),
+      name: normalizedName,
+      email: normalizedEmail,
       password: hashedPassword,
       role: role === 'admin' ? 'admin' : 'teacher',
-      school: school ? school.trim() : 'General Secondary School',
+      school: normalizedSchool || 'General Secondary School',
       subjectSpecialties: Array.isArray(subjectSpecialties) ? subjectSpecialties : ['General Science'],
       phone: '',
       bio: '',

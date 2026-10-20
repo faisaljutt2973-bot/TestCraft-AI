@@ -23,6 +23,10 @@ const supportRoutes = require('./routes/supportRoutes');
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+// Render/Netlify sit in front of the app. Without this, express-rate-limit keys
+// every user behind the proxy to the same IP and can throttle unrelated users.
+app.set('trust proxy', process.env.TRUST_PROXY === 'false' ? false : Number(process.env.TRUST_PROXY_HOPS || 1));
+
 // Security headers
 app.use(
   helmet({
@@ -30,6 +34,7 @@ app.use(
       directives: {
         defaultSrc: ["'self'"],
         scriptSrc: ["'self'"],
+        workerSrc: ["'self'", 'blob:'],
         styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
         fontSrc: ["'self'", 'https://fonts.gstatic.com', 'data:'],
         imgSrc: ["'self'", 'data:', 'https:'],
@@ -62,42 +67,35 @@ app.use(
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Rate limiting: broad API cap plus stricter auth limits
-const apiLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  limit: 600,
-  standardHeaders: 'draft-7',
-  legacyHeaders: false,
-  message: { success: false, message: 'Too many requests. Please try again later.' },
-});
-
-const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  limit: 30,
-  standardHeaders: 'draft-7',
-  legacyHeaders: false,
-  message: { success: false, message: 'Too many authentication attempts. Please try again in 15 minutes.' },
-});
-
-app.use('/api', apiLimiter);
-app.use('/api/auth/login', authLimiter);
-app.use('/api/auth/register', authLimiter);
-app.use('/api/auth/forgot-password', authLimiter);
-app.use('/api/auth/reset-password', authLimiter);
-
-// Static uploads directory (authenticated users only)
-app.use('/uploads', authenticate, express.static(path.join(__dirname, 'uploads')));
-
-// Health check endpoint
+// Health check must stay cheap and exempt from API throttling (uptime pingers).
 app.get('/api/health', (req, res) => {
+  const mongoConfigured = Boolean(process.env.MONGODB_URI);
+  const dbConnected = require('mongoose').connection.readyState === 1;
   res.json({
-    status: 'healthy',
+    status: mongoConfigured && !dbConnected ? 'degraded' : 'healthy',
     platform: 'TestCraft AI',
-    version: '1.0.0',
+    version: '1.0.1',
+    database: mongoConfigured ? (dbConnected ? 'connected' : 'disconnected') : 'local-file',
+    uptimeSeconds: Math.round(process.uptime()),
     timestamp: new Date().toISOString(),
     environment: process.env.NODE_ENV || 'development',
   });
 });
+
+// Rate limiting: broad API cap plus stricter auth limits
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 1200,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  skip: (req) => req.path === '/health',
+  message: { success: false, message: 'Too many requests. Please try again later.' },
+});
+
+app.use('/api', apiLimiter);
+
+// Static uploads directory (authenticated users only)
+app.use('/uploads', authenticate, express.static(path.join(__dirname, 'uploads')));
 
 // API Routes
 app.use('/api/auth', authRoutes);
@@ -114,9 +112,22 @@ const clientDist = path.join(__dirname, '..', 'client', 'dist');
 const hasClientBuild = fs.existsSync(path.join(clientDist, 'index.html'));
 
 if (hasClientBuild) {
-  app.use(express.static(clientDist));
+  // Hashed Vite assets are immutable; index.html must always be revalidated.
+  app.use(
+    express.static(clientDist, {
+      index: false,
+      maxAge: '1y',
+      immutable: true,
+      setHeaders: (res, filePath) => {
+        if (/(index\.html|robots\.txt|sitemap\.xml)$/.test(filePath)) {
+          res.setHeader('Cache-Control', 'no-cache');
+        }
+      },
+    })
+  );
   // SPA fallback: serve index.html for any non-API, non-upload GET request
   app.get(/^\/(?!api\/|uploads\/).*/, (req, res) => {
+    res.setHeader('Cache-Control', 'no-cache');
     res.sendFile(path.join(clientDist, 'index.html'));
   });
 }
@@ -159,7 +170,7 @@ const warnProductionConfig = () => {
   await connectDB();
   await seedDefaultData();
 
-  app.listen(PORT, () => {
+  const server = app.listen(PORT, () => {
     console.log(`=======================================================`);
     console.log(`   TestCraft AI Server running on http://localhost:${PORT}`);
     console.log(`   Health Check: http://localhost:${PORT}/api/health`);
@@ -171,6 +182,11 @@ const warnProductionConfig = () => {
     console.log(`=======================================================`);
     warnProductionConfig();
   });
+
+  // Keep connections warm behind Render's proxy and allow slow AI generations.
+  server.keepAliveTimeout = 65000;
+  server.headersTimeout = 66000;
+  server.requestTimeout = 180000;
 })().catch((err) => {
   console.error('[Startup Error]', err);
   process.exit(1);

@@ -126,8 +126,8 @@ export const Login = ({ onSwitchToRegister, resetToken = '', onResetComplete }) 
                       <input
                         type="password"
                         required
-                        minLength={6}
-                        placeholder="At least 6 characters"
+                        minLength={8}
+                        placeholder="At least 8 characters"
                         value={resetPasswordValue}
                         onChange={(e) => setResetPasswordValue(e.target.value)}
                         className="w-full text-xs pl-10 pr-3.5 py-2.5 border border-slate-300 rounded-xl focus:border-brand-500 focus:outline-none"
@@ -141,7 +141,7 @@ export const Login = ({ onSwitchToRegister, resetToken = '', onResetComplete }) 
                       <input
                         type="password"
                         required
-                        minLength={6}
+                        minLength={8}
                         placeholder="Re-enter your new password"
                         value={confirmPassword}
                         onChange={(e) => setConfirmPassword(e.target.value)}
@@ -285,7 +285,7 @@ export const Login = ({ onSwitchToRegister, resetToken = '', onResetComplete }) 
                     <input
                       type="password"
                       required
-                      placeholder="••••••••"
+                      placeholder="Enter your password"
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
                       className="w-full text-xs pl-10 pr-3.5 py-2.5 border border-slate-300 rounded-xl focus:border-brand-500 focus:outline-none"

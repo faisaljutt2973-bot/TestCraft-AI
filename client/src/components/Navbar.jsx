@@ -36,10 +36,12 @@ export const Navbar = ({ activeTab, onQuickNewTest, onQuickAddBook, onOpenSideba
           {titles[activeTab] || 'TestCraft AI'}
         </h1>
 
-        <div className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 bg-slate-100 rounded-full text-xs font-medium text-slate-600 flex-shrink-0 min-w-0">
-          <School className="w-3.5 h-3.5 text-brand-600" />
-          <span className="max-w-[220px] truncate">{user?.school || 'Beaconhouse School System'}</span>
-        </div>
+        {user?.school && (
+          <div className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 bg-slate-100 rounded-full text-xs font-medium text-slate-600 flex-shrink-0 min-w-0">
+            <School className="w-3.5 h-3.5 text-brand-600" />
+            <span className="max-w-[220px] truncate">{user.school}</span>
+          </div>
+        )}
       </div>
 
       <div className="flex items-center gap-2 sm:gap-2.5 flex-shrink-0">

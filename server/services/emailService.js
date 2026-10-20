@@ -27,6 +27,12 @@ const getTransporter = () => {
       port: config.port,
       secure: config.secure,
       auth: { user: config.user, pass: config.pass },
+      pool: true,
+      maxConnections: 3,
+      maxMessages: 50,
+      connectionTimeout: 10000,
+      greetingTimeout: 10000,
+      socketTimeout: 20000,
     });
     transporterSignature = signature;
   }
@@ -54,7 +60,21 @@ const sendMail = async ({ to, subject, text, html }) => {
   }
 };
 
-const getClientUrl = () => (process.env.CLIENT_URL || 'http://localhost:5173').replace(/\/$/, '');
+const getClientUrl = () => {
+  const explicit = process.env.CLIENT_URL || process.env.APP_URL;
+  if (explicit) return explicit.replace(/\/$/, '');
+
+  if (process.env.NODE_ENV !== 'production') return 'http://localhost:5173';
+
+  const corsOrigin = (process.env.CORS_ORIGINS || '')
+    .split(',')
+    .map((origin) => origin.trim())
+    .find((origin) => origin.startsWith('http'));
+
+  if (corsOrigin) return corsOrigin.replace(/\/$/, '');
+  console.warn('[Email] CLIENT_URL is not set in production; password reset links may be unusable.');
+  return '';
+};
 
 module.exports = {
   sendMail,

@@ -19,21 +19,26 @@ export const Dashboard = ({ setActiveTab, onSelectTest, onOpenAddBook }) => {
   const [stats, setStats] = useState(null);
   const [recentTests, setRecentTests] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [statsError, setStatsError] = useState(null);
+
+  const fetchDashboardData = async () => {
+    try {
+      setLoading(true);
+      setStatsError(null);
+      const res = await api.getStats();
+      if (res.success) {
+        setStats(res.stats);
+        setRecentTests(res.recentTests || []);
+      }
+    } catch (err) {
+      console.error('Failed to load dashboard statistics:', err);
+      setStatsError(err.message || 'Dashboard statistics are temporarily unavailable.');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    const fetchDashboardData = async () => {
-      try {
-        const res = await api.getStats();
-        if (res.success) {
-          setStats(res.stats);
-          setRecentTests(res.recentTests || []);
-        }
-      } catch (err) {
-        console.error('Failed to load dashboard statistics:', err);
-      } finally {
-        setLoading(false);
-      }
-    };
     fetchDashboardData();
   }, []);
 
@@ -109,6 +114,20 @@ export const Dashboard = ({ setActiveTab, onSelectTest, onOpenAddBook }) => {
         {/* Decorative background glow */}
         <div className="absolute -right-12 -bottom-12 w-80 h-80 bg-brand-500/20 rounded-full blur-3xl pointer-events-none" />
       </div>
+
+      {statsError && (
+        <div className="p-4 bg-rose-50 border border-rose-200 rounded-xl flex flex-wrap items-center justify-between gap-3 text-xs text-rose-800">
+          <span>{statsError}</span>
+          <button
+            type="button"
+            onClick={fetchDashboardData}
+            disabled={loading}
+            className="px-3 py-1.5 rounded-lg bg-rose-600 text-white font-bold hover:bg-rose-700 disabled:opacity-50"
+          >
+            {loading ? 'Retrying…' : 'Retry'}
+          </button>
+        </div>
+      )}
 
       {/* KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">

@@ -55,6 +55,7 @@ export const Register = ({ onSwitchToLogin }) => {
                 <input
                   type="text"
                   required
+                  maxLength={100}
                   placeholder="Prof. Ayesha Khan"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
@@ -85,7 +86,8 @@ export const Register = ({ onSwitchToLogin }) => {
                 <input
                   type="password"
                   required
-                  placeholder="••••••••"
+                  minLength={8}
+                  placeholder="At least 8 characters"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   className="w-full text-xs pl-10 pr-3.5 py-2.5 border border-slate-300 rounded-xl focus:border-brand-500 focus:outline-none"
@@ -94,11 +96,13 @@ export const Register = ({ onSwitchToLogin }) => {
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">School / Institution</label>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">School / Institution *</label>
               <div className="relative">
                 <School className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
                 <input
                   type="text"
+                  required
+                  maxLength={120}
                   placeholder="e.g. Beaconhouse, Army Public School, etc."
                   value={school}
                   onChange={(e) => setSchool(e.target.value)}

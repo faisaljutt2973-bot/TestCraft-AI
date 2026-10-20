@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Sparkles,
   BookOpen,
@@ -16,13 +16,18 @@ import {
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { api } from '../services/api';
+import { useAuth } from '../context/AuthContext';
 
 export const TestGenerator = ({ preselectedBook, preselectedChapters, preselectedConfig = {}, onTestGenerated }) => {
+  const { user } = useAuth();
   const [step, setStep] = useState(1);
   const [books, setBooks] = useState([]);
   const [loadingBooks, setLoadingBooks] = useState(true);
+  const [booksError, setBooksError] = useState(null);
   const [generating, setGenerating] = useState(false);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [errorMessage, setErrorMessage] = useState(null);
+  const generationLock = useRef(false);
 
   // Form State
   const [selectedBookId, setSelectedBookId] = useState(preselectedBook?.id || '');
@@ -30,7 +35,7 @@ export const TestGenerator = ({ preselectedBook, preselectedChapters, preselecte
 
   const [examType, setExamType] = useState('Chapter-wise test');
   const [title, setTitle] = useState('');
-  const [schoolName, setSchoolName] = useState('Beaconhouse School System');
+  const [schoolName, setSchoolName] = useState(user?.school || '');
   const [examinationHeading, setExaminationHeading] = useState('MIDTERM EXAMINATION - 2026');
   const [durationMinutes, setDurationMinutes] = useState(90);
   const [totalMarks, setTotalMarks] = useState(50);
@@ -58,26 +63,42 @@ export const TestGenerator = ({ preselectedBook, preselectedChapters, preselecte
     numerical: 5,
   });
 
-  useEffect(() => {
-    const loadBooks = async () => {
-      try {
-        setLoadingBooks(true);
-        const res = await api.getBooks();
-        if (res.success) {
-          setBooks(res.books);
-          if (!selectedBookId && res.books.length > 0) {
-            setSelectedBookId(res.books[0].id);
-            setSelectedChapters((res.books[0].chapters || []).map((c) => c.chapterNumber));
-          }
+  const loadBooks = async () => {
+    try {
+      setLoadingBooks(true);
+      setBooksError(null);
+      const res = await api.getBooks();
+      if (res.success) {
+        setBooks(res.books);
+        if (!selectedBookId && res.books.length > 0) {
+          setSelectedBookId(res.books[0].id);
+          setSelectedChapters((res.books[0].chapters || []).map((c) => c.chapterNumber));
         }
-      } catch (err) {
-        console.error('Failed to load books:', err);
-      } finally {
-        setLoadingBooks(false);
       }
-    };
+    } catch (err) {
+      console.error('Failed to load books:', err);
+      setBooksError(err.message || 'Could not load your textbook library.');
+    } finally {
+      setLoadingBooks(false);
+    }
+  };
+
+  useEffect(() => {
     loadBooks();
   }, []);
+
+  useEffect(() => {
+    if (user?.school && !schoolName.trim()) setSchoolName(user.school);
+  }, [user?.school]);
+
+  useEffect(() => {
+    if (!generating) {
+      setElapsedSeconds(0);
+      return undefined;
+    }
+    const timer = setInterval(() => setElapsedSeconds((seconds) => seconds + 1), 1000);
+    return () => clearInterval(timer);
+  }, [generating]);
 
   const currentBook = books.find((b) => b.id === selectedBookId) || preselectedBook;
 
@@ -139,6 +160,13 @@ export const TestGenerator = ({ preselectedBook, preselectedChapters, preselecte
   };
 
   const handleGenerate = async () => {
+    if (generationLock.current) return;
+
+    if (!currentBook) {
+      setErrorMessage('Please select a textbook before generating a paper.');
+      return;
+    }
+
     if (!isMarksBalanced) {
       setErrorMessage(`Cannot generate paper: Questions sum up to ${computedTotal} marks, but total marks is set to ${totalMarks}. Please balance marks first.`);
       return;
@@ -148,6 +176,8 @@ export const TestGenerator = ({ preselectedBook, preselectedChapters, preselecte
       setErrorMessage('Please select at least one syllabus chapter.');
       return;
     }
+
+    generationLock.current = true;
 
     try {
       setGenerating(true);
@@ -179,8 +209,9 @@ export const TestGenerator = ({ preselectedBook, preselectedChapters, preselecte
         onTestGenerated(res.testPaper.id);
       }
     } catch (err) {
-      setErrorMessage(err.message || 'Generation failed.');
+      setErrorMessage(err.message || 'Generation failed. Please try again.');
     } finally {
+      generationLock.current = false;
       setGenerating(false);
     }
   };
@@ -245,19 +276,40 @@ export const TestGenerator = ({ preselectedBook, preselectedChapters, preselecte
             <p className="text-xs text-slate-500">Pick the target curriculum textbook and define chapter coverage.</p>
           </div>
 
+          {booksError && (
+            <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl flex flex-wrap items-center justify-between gap-2 text-xs text-rose-800">
+              <span>{booksError}</span>
+              <button
+                type="button"
+                onClick={loadBooks}
+                className="px-3 py-1.5 rounded-lg bg-rose-600 text-white font-bold hover:bg-rose-700"
+              >
+                Retry
+              </button>
+            </div>
+          )}
+
           <div>
             <label className="block text-xs font-bold text-slate-700 mb-1.5">Selected Textbook</label>
             <select
               value={selectedBookId}
               onChange={(e) => handleBookChange(e.target.value)}
-              className="w-full text-xs p-3 border border-slate-300 rounded-xl focus:border-brand-500 focus:outline-none"
+              disabled={loadingBooks || books.length === 0}
+              className="w-full text-xs p-3 border border-slate-300 rounded-xl focus:border-brand-500 focus:outline-none disabled:bg-slate-50 disabled:text-slate-400"
             >
+              {loadingBooks && <option value="">Loading textbooks…</option>}
+              {!loadingBooks && books.length === 0 && <option value="">No textbooks available</option>}
               {books.map((b) => (
                 <option key={b.id} value={b.id}>
                   {b.title} ({b.className} - {b.subject} | {b.boardName})
                 </option>
               ))}
             </select>
+            {!loadingBooks && books.length === 0 && !booksError && (
+              <p className="mt-1.5 text-[11px] text-slate-500">
+                Add a textbook from the Textbook Library first, then return here to generate a paper.
+              </p>
+            )}
           </div>
 
           {currentBook && (
@@ -366,8 +418,11 @@ export const TestGenerator = ({ preselectedBook, preselectedChapters, preselecte
                 type="text"
                 value={schoolName}
                 onChange={(e) => setSchoolName(e.target.value)}
+                placeholder="Your school or institution"
+                maxLength={120}
                 className="w-full text-xs p-2.5 border border-slate-300 rounded-xl focus:border-brand-500 focus:outline-none"
               />
+              <p className="mt-1 text-[11px] text-slate-500">Prefilled from your profile. You can adjust it for this paper.</p>
             </div>
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1">Examination Heading</label>
@@ -561,7 +616,7 @@ export const TestGenerator = ({ preselectedBook, preselectedChapters, preselecte
               {generating ? (
                 <>
                   <Sparkles className="w-5 h-5 animate-spin" />
-                  <span>Generating Syllabus-Grounded Examination Paper...</span>
+                  <span>Generating Exam Paper… {elapsedSeconds > 0 ? `(${elapsedSeconds}s)` : ''}</span>
                 </>
               ) : (
                 <>
@@ -570,6 +625,11 @@ export const TestGenerator = ({ preselectedBook, preselectedChapters, preselecte
                 </>
               )}
             </button>
+            {generating && (
+              <p className="mt-2 text-center text-[11px] text-slate-500">
+                This usually takes 10–30 seconds. Please keep this tab open.
+              </p>
+            )}
           </div>
         </div>
       )}

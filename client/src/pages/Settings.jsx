@@ -15,7 +15,7 @@ export const Settings = () => {
     geminiApiKey: '',
     openaiApiKey: '',
     googleBooksApiKey: '',
-    schoolName: 'Beaconhouse School System',
+    schoolName: '',
     schoolLogo: '',
     examHeaderTemplate: 'MIDTERM EXAMINATION - 2026',
     maxExamDuration: 180,
@@ -35,7 +35,7 @@ export const Settings = () => {
             geminiApiKey: res.settings.geminiApiKey || '',
             openaiApiKey: res.settings.openaiApiKey || '',
             googleBooksApiKey: res.settings.googleBooksApiKey || '',
-            schoolName: res.settings.schoolName || 'Beaconhouse School System',
+            schoolName: res.settings.schoolName || '',
             schoolLogo: res.settings.schoolLogo || '',
             examHeaderTemplate: res.settings.examHeaderTemplate || 'MIDTERM EXAMINATION - 2026',
             maxExamDuration: res.settings.maxExamDuration || 180,
@@ -56,17 +56,7 @@ export const Settings = () => {
     e.preventDefault();
     try {
       setSaving(true);
-      const payload = isAdmin
-        ? form
-        : {
-            schoolName: form.schoolName,
-            schoolLogo: form.schoolLogo,
-            examHeaderTemplate: form.examHeaderTemplate,
-            maxExamDuration: form.maxExamDuration,
-            passingPercentage: form.passingPercentage,
-            allowNegativeMarking: form.allowNegativeMarking,
-          };
-      const res = await api.updateSettings(payload);
+      const res = await api.updateSettings(form);
       if (res.success) {
         setSuccess(true);
         setTimeout(() => setSuccess(false), 3000);
@@ -80,6 +70,25 @@ export const Settings = () => {
 
   if (loading) {
     return <div className="p-12 text-center text-xs text-slate-500">Loading system settings...</div>;
+  }
+
+  if (!isAdmin) {
+    return (
+      <div className="max-w-3xl mx-auto">
+        <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-3">
+          <div className="flex items-center gap-2">
+            <School className="w-4 h-4 text-brand-600" />
+            <h2 className="text-base font-bold text-slate-900">Institutional Settings</h2>
+          </div>
+          <p className="text-xs text-slate-600">
+            Institution-wide branding and exam defaults are managed by an administrator.
+          </p>
+          <p className="text-xs text-slate-600">
+            To change the school printed on your papers, update the school field in My Profile.
+          </p>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -127,7 +136,7 @@ export const Settings = () => {
               onChange={(e) => setForm({ ...form, aiProvider: e.target.value })}
               className="w-full text-xs p-2.5 border border-slate-300 rounded-xl focus:outline-none"
             >
-              <option value="gemini">Google Gemini 1.5 Flash (Recommended)</option>
+              <option value="gemini">Google Gemini 2.5 Flash (Recommended)</option>
               <option value="openai">OpenAI GPT-4o / GPT-4o-mini</option>
               <option value="heuristic">Local Grounded Heuristic Engine (No API key needed)</option>
             </select>

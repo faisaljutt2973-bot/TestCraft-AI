@@ -4,53 +4,115 @@ const uuidv4 = () => crypto.randomUUID();
 
 /**
  * AI Provider Integration (Google Gemini REST API)
+ * - Hard timeout so a slow/hung provider can never block the request for 30-40s.
+ * - Retries only transient gateway errors; falls back to the deterministic generator otherwise.
  */
-const callGeminiAPI = async (apiKey, promptText) => {
-  return new Promise((resolve, reject) => {
-    const payload = JSON.stringify({
-      contents: [{ parts: [{ text: promptText }] }],
-      generationConfig: {
-        temperature: 0.2,
-        topP: 0.95,
-        responseMimeType: 'application/json',
-      },
-    });
+const DEFAULT_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+const DEFAULT_TIMEOUT_MS = parseInt(process.env.AI_TIMEOUT_MS || '25000', 10) || 25000;
 
-    const options = {
-      hostname: 'generativelanguage.googleapis.com',
-      path: `/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(payload),
-      },
-    };
+const parseAIJson = (text) => {
+  const cleaned = String(text)
+    .trim()
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```$/, '')
+    .trim();
+  return JSON.parse(cleaned);
+};
 
-    const req = https.request(options, (res) => {
-      let data = '';
-      res.on('data', (chunk) => (data += chunk));
-      res.on('end', () => {
-        try {
-          const parsed = JSON.parse(data);
-          if (parsed.error) {
-            return reject(new Error(`Gemini API Error: ${parsed.error.message}`));
-          }
-          const text = parsed.candidates?.[0]?.content?.parts?.[0]?.text;
-          if (!text) {
-            return reject(new Error('No response content returned from Gemini model.'));
-          }
-          const jsonResult = JSON.parse(text);
-          resolve(jsonResult);
-        } catch (e) {
-          reject(new Error(`Failed to parse AI JSON response: ${e.message}`));
-        }
-      });
-    });
+const callGeminiAPI = async (apiKey, promptText, options = {}) => {
+  const model = options.model || DEFAULT_MODEL;
+  const timeoutMs = options.timeoutMs || DEFAULT_TIMEOUT_MS;
 
-    req.on('error', (err) => reject(new Error(`Gemini network error: ${err.message}`)));
-    req.write(payload);
-    req.end();
+  const payload = JSON.stringify({
+    contents: [{ parts: [{ text: promptText }] }],
+    generationConfig: {
+      temperature: 0.2,
+      topP: 0.95,
+      responseMimeType: 'application/json',
+    },
   });
+
+  const attempt = () =>
+    new Promise((resolve, reject) => {
+      let settled = false;
+      const finish = (fn, value) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(deadline);
+        fn(value);
+      };
+
+      const req = https.request(
+        {
+          hostname: 'generativelanguage.googleapis.com',
+          path: `/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`,
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Content-Length': Buffer.byteLength(payload),
+          },
+        },
+        (res) => {
+          let data = '';
+          res.on('data', (chunk) => (data += chunk));
+          res.on('end', () => {
+            let parsed;
+            try {
+              parsed = JSON.parse(data);
+            } catch (e) {
+              return finish(
+                reject,
+                new Error(`AI provider returned a non-JSON response (HTTP ${res.statusCode}).`)
+              );
+            }
+
+            if (res.statusCode >= 400 || parsed.error) {
+              const providerMessage = parsed.error?.message || `HTTP ${res.statusCode}`;
+              const err = new Error(`Gemini API error: ${providerMessage}`);
+              err.statusCode = res.statusCode;
+              err.retryable = [502, 503, 504].includes(res.statusCode);
+              return finish(reject, err);
+            }
+
+            const text = (parsed.candidates?.[0]?.content?.parts || [])
+              .map((part) => part.text || '')
+              .join('');
+            if (!text) {
+              return finish(reject, new Error('No response content returned from the AI model.'));
+            }
+
+            try {
+              finish(resolve, parseAIJson(text));
+            } catch (e) {
+              finish(reject, new Error(`Failed to parse AI JSON response: ${e.message}`));
+            }
+          });
+        }
+      );
+
+      const deadline = setTimeout(() => {
+        req.destroy();
+        finish(reject, new Error(`AI provider timed out after ${Math.round(timeoutMs / 1000)}s.`));
+      }, timeoutMs);
+
+      req.setTimeout(timeoutMs, () => {
+        req.destroy();
+        finish(reject, new Error(`AI provider timed out after ${Math.round(timeoutMs / 1000)}s.`));
+      });
+      req.on('error', (err) => finish(reject, new Error(`Gemini network error: ${err.message}`)));
+      req.write(payload);
+      req.end();
+    });
+
+  try {
+    return await attempt();
+  } catch (err) {
+    if (err.retryable) {
+      await new Promise((resolve) => setTimeout(resolve, 800));
+      return attempt();
+    }
+    throw err;
+  }
 };
 
 /**
@@ -421,12 +483,21 @@ const generateExamPaper = async ({
   // Step 2: Try AI Provider if API key is configured
   let generatedQuestions = [];
   const apiKey = settings?.geminiApiKey || process.env.GEMINI_API_KEY;
+  const requestedCount = Object.values(questionTypeCounts).reduce(
+    (sum, count) => sum + (parseInt(count, 10) || 0),
+    0
+  );
 
   if (apiKey && settings?.aiProvider === 'gemini') {
     try {
-      console.log('[AI Service] Invoking Google Gemini 1.5 Flash for syllabus-grounded exam generation...');
+      const model = settings?.geminiModel || process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+      console.log(`[AI Service] Invoking ${model} for syllabus-grounded exam generation...`);
+      const selectedChapterKeys = new Set(selectedChapters.map((chapter) => String(chapter)));
       const chaptersInfo = (book.chapters || [])
-        .filter((ch) => selectedChapters.includes(ch.chapterNumber) || selectedChapters.includes(ch.id))
+        .filter(
+          (ch) =>
+            selectedChapterKeys.has(String(ch.chapterNumber)) || selectedChapterKeys.has(String(ch.id))
+        )
         .map((ch) => `Chapter ${ch.chapterNumber}: ${ch.title} (Topics: ${(ch.topics || []).join(', ')})`)
         .join('\n');
 
@@ -469,16 +540,28 @@ Rules:
   ]
 }`;
 
-      const aiResponse = await callGeminiAPI(apiKey, prompt);
-      if (aiResponse && aiResponse.questions && aiResponse.questions.length > 0) {
-        generatedQuestions = aiResponse.questions.map((q, idx) => ({
+      const aiResponse = await callGeminiAPI(apiKey, prompt, { model });
+      const aiQuestions = Array.isArray(aiResponse?.questions) ? aiResponse.questions : [];
+
+      if (aiQuestions.length >= requestedCount && requestedCount > 0) {
+        generatedQuestions = aiQuestions.slice(0, requestedCount).map((q, idx) => ({
           ...q,
           id: uuidv4(),
           number: idx + 1,
+          marks:
+            Number(q.marks) > 0
+              ? Number(q.marks)
+              : marksPerType[q.questionType] || 1,
         }));
+      } else {
+        console.warn(
+          `[AI Service] AI returned ${aiQuestions.length} questions but ${requestedCount} were requested. Using deterministic grounded generator instead.`
+        );
       }
     } catch (aiErr) {
-      console.warn(`[AI Service] Gemini generation failed: ${aiErr.message}. Falling back to high-fidelity grounded heuristic generator.`);
+      console.warn(
+        `[AI Service] Gemini generation failed: ${aiErr.message}. Falling back to high-fidelity grounded heuristic generator.`
+      );
     }
   }
 

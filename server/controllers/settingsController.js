@@ -54,26 +54,49 @@ const updateSettings = async (req, res) => {
 
     const isAdmin = req.user && req.user.role === 'admin';
 
+    // Institution-wide branding and exam defaults are administrator-owned.
+    // Teachers keep their own school on their profile instead.
+    if (!isAdmin) {
+      return res.status(403).json({
+        success: false,
+        message:
+          'Institution settings can only be changed by an administrator. Update your own school from your Profile page.',
+      });
+    }
+
     const updates = {};
-    if (aiProvider !== undefined && isAdmin) updates.aiProvider = aiProvider;
-    if (schoolName !== undefined) updates.schoolName = schoolName.trim();
+    if (aiProvider !== undefined) {
+      if (!['gemini', 'openai', 'heuristic'].includes(aiProvider)) {
+        return res.status(400).json({ success: false, message: 'Unsupported AI provider.' });
+      }
+      updates.aiProvider = aiProvider;
+    }
+    if (schoolName !== undefined) {
+      const normalized = String(schoolName).trim().replace(/\s+/g, ' ');
+      if (!normalized) {
+        return res.status(400).json({ success: false, message: 'Institution name cannot be empty.' });
+      }
+      updates.schoolName = normalized.slice(0, 120);
+    }
     if (schoolLogo !== undefined) updates.schoolLogo = schoolLogo;
-    if (examHeaderTemplate !== undefined) updates.examHeaderTemplate = examHeaderTemplate.trim();
-    if (maxExamDuration !== undefined) updates.maxExamDuration = parseInt(maxExamDuration, 10);
-    if (passingPercentage !== undefined) updates.passingPercentage = parseInt(passingPercentage, 10);
+    if (examHeaderTemplate !== undefined) updates.examHeaderTemplate = String(examHeaderTemplate).trim().slice(0, 500);
+    if (maxExamDuration !== undefined) {
+      updates.maxExamDuration = Math.min(Math.max(parseInt(maxExamDuration, 10) || 180, 10), 600);
+    }
+    if (passingPercentage !== undefined) {
+      updates.passingPercentage = Math.min(Math.max(parseInt(passingPercentage, 10) || 40, 0), 100);
+    }
     if (allowNegativeMarking !== undefined) updates.allowNegativeMarking = Boolean(allowNegativeMarking);
 
     // Only administrators may set AI provider credentials (and never re-save masked values).
-    if (isAdmin) {
-      if (geminiApiKey && !geminiApiKey.startsWith('••••')) {
-        updates.geminiApiKey = geminiApiKey.trim();
-      }
-      if (openaiApiKey && !openaiApiKey.startsWith('••••')) {
-        updates.openaiApiKey = openaiApiKey.trim();
-      }
-      if (googleBooksApiKey && !googleBooksApiKey.startsWith('••••')) {
-        updates.googleBooksApiKey = googleBooksApiKey.trim();
-      }
+    if (geminiApiKey && !geminiApiKey.startsWith('••••')) {
+      updates.geminiApiKey = geminiApiKey.trim();
+    }
+    if (openaiApiKey && !openaiApiKey.startsWith('••••')) {
+      updates.openaiApiKey = openaiApiKey.trim();
+    }
+    if (googleBooksApiKey && !googleBooksApiKey.startsWith('••••')) {
+      updates.googleBooksApiKey = googleBooksApiKey.trim();
     }
 
     const updated = await Storage.updateSettings(updates);
@@ -89,10 +112,17 @@ const updateSettings = async (req, res) => {
 
 const getStats = async (req, res) => {
   try {
-    const books = await Storage.find('books');
-    const tests = await Storage.find('testPapers');
-    const questions = await Storage.find('questions');
-    const boards = await Storage.find('boards');
+    // Match test visibility with GET /api/tests and GET /api/tests/:id:
+    // teachers only see papers they created, administrators see everything.
+    const testFilter = req.user.role === 'admin' ? {} : { createdBy: req.user.id };
+
+    // Independent queries run concurrently instead of four sequential Atlas round-trips.
+    const [books, tests, questions, boards] = await Promise.all([
+      Storage.find('books'),
+      Storage.find('testPapers', testFilter),
+      Storage.find('questions'),
+      Storage.find('boards'),
+    ]);
 
     let totalChaptersCount = 0;
     books.forEach((b) => {
