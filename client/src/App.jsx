@@ -111,7 +111,7 @@ const MainApp = () => {
 
   const handleMakeTestFromBook = (book) => {
     setPreselectedBook(book);
-    setPreselectedChapters((book?.chapters || []).map((c) => c.chapterNumber));
+    setPreselectedChapters((book?.chapters || []).filter((c) => !c.isExcluded).map((c) => c.chapterNumber));
     setPreselectedConfig({});
     setActiveTab('generator');
   };

@@ -493,16 +493,32 @@ const generateExamPaper = async ({
       const model = settings?.geminiModel || process.env.GEMINI_MODEL || 'gemini-2.5-flash';
       console.log(`[AI Service] Invoking ${model} for syllabus-grounded exam generation...`);
       const selectedChapterKeys = new Set(selectedChapters.map((chapter) => String(chapter)));
-      const chaptersInfo = (book.chapters || [])
-        .filter(
-          (ch) =>
-            selectedChapterKeys.has(String(ch.chapterNumber)) || selectedChapterKeys.has(String(ch.id))
-        )
-        .map((ch) => `Chapter ${ch.chapterNumber}: ${ch.title} (Topics: ${(ch.topics || []).join(', ')})`)
-        .join('\n');
+      const selectedChapterList = (book.chapters || []).filter(
+        (ch) =>
+          selectedChapterKeys.has(String(ch.chapterNumber)) || selectedChapterKeys.has(String(ch.id))
+      );
+
+      let remainingContext = 120000;
+      const chaptersInfo = selectedChapterList
+        .map((ch) => {
+          const content = String(ch.rawContent || '').trim();
+          const allowance = Math.min(remainingContext, 12000);
+          const excerpt = content && allowance > 0 ? content.slice(0, allowance) : '';
+          remainingContext -= excerpt.length;
+
+          const header = [
+            `Chapter ${ch.chapterNumber}: ${ch.title}`,
+            `Pages: ${ch.pages || 'N/A'}`,
+            `Topics: ${(ch.topics || []).join(', ') || 'Not listed'}`,
+          ].join('\n');
+
+          if (excerpt) return `${header}\nSource excerpt:\n${excerpt}`;
+          return `${header}\nSource excerpt: (none supplied - use only the chapter title and listed topics)`;
+        })
+        .join('\n\n---\n\n');
 
       const prompt = `You are a professional educational assessment specialist and curriculum architect.
-Generate a structured examination paper strictly based on this educational curriculum:
+Generate a structured examination paper based on this textbook content:
 Book: ${book.title}
 Subject: ${book.subject}
 Class: ${book.className}
@@ -518,10 +534,12 @@ Configuration:
 - Marks Per Type: ${JSON.stringify(marksPerType)}
 
 Rules:
-1. Ensure every question is age-appropriate and directly answerable from the syllabus content.
-2. For MCQs, provide 4 distinct plausible options and the index of the correct option (0-3).
-3. For Short and Long questions, provide the exact model answer and marking rubric.
-4. Return ONLY a valid JSON object matching this schema:
+1. Every question must be age-appropriate and answerable from the supplied chapter excerpts. When no excerpt is supplied, use only the chapter title and listed topics, and do not invent page numbers or unsupported facts.
+2. Keep the requested question type counts exactly. Do not add or remove questions.
+3. For MCQs, provide 4 distinct plausible options and the index of the correct option (0-3).
+4. For Short and Long questions, provide the exact model answer and marking rubric.
+5. Use only chapter numbers from the supplied list. Keep each sourceReference honest: cite chapter and pages only when supplied.
+6. Return ONLY a valid JSON object matching this schema:
 {
   "questions": [
     {
@@ -542,20 +560,60 @@ Rules:
 
       const aiResponse = await callGeminiAPI(apiKey, prompt, { model });
       const aiQuestions = Array.isArray(aiResponse?.questions) ? aiResponse.questions : [];
+      const allowedTypes = new Set(Object.keys(marksPerType));
+      const selectedNumbers = new Set(selectedChapterList.map((chapter) => Number(chapter.chapterNumber)));
 
-      if (aiQuestions.length >= requestedCount && requestedCount > 0) {
-        generatedQuestions = aiQuestions.slice(0, requestedCount).map((q, idx) => ({
+      const sanitizedAiQuestions = aiQuestions
+        .filter((q) => {
+          if (!q || !allowedTypes.has(q.questionType)) return false;
+          if (typeof q.questionText !== 'string' || !q.questionText.trim()) return false;
+          if (q.questionType === 'mcq') {
+            if (!Array.isArray(q.options) || q.options.length !== 4) return false;
+            const answerIndex = Number(q.correctAnswer);
+            if (!Number.isInteger(answerIndex) || answerIndex < 0 || answerIndex > 3) return false;
+          }
+          return true;
+        })
+        .map((q) => {
+          const chapterNumber = Number(q.chapterNumber);
+          const fallbackChapter = selectedChapterList[0];
+          const validChapter = selectedNumbers.has(chapterNumber)
+            ? chapterNumber
+            : Number(fallbackChapter?.chapterNumber) || 1;
+
+          return {
+            ...q,
+            questionText: String(q.questionText).trim(),
+            options:
+              q.questionType === 'mcq'
+                ? q.options.map((option) => String(option ?? '').trim())
+                : undefined,
+            correctAnswer:
+              q.questionType === 'mcq' ? Number(q.correctAnswer) : q.correctAnswer,
+            marks:
+              Number(q.marks) > 0
+                ? Number(q.marks)
+                : marksPerType[q.questionType] || 1,
+            chapterNumber: validChapter,
+            chapterTitle:
+              sanitizeText(q.chapterTitle, 180) ||
+              selectedChapterList.find((chapter) => Number(chapter.chapterNumber) === validChapter)?.title ||
+              '',
+            sourceReference:
+              sanitizeText(q.sourceReference, 300) ||
+              `${book.title}, Chapter ${validChapter}`,
+          };
+        });
+
+      if (sanitizedAiQuestions.length >= requestedCount && requestedCount > 0) {
+        generatedQuestions = sanitizedAiQuestions.slice(0, requestedCount).map((q, idx) => ({
           ...q,
           id: uuidv4(),
           number: idx + 1,
-          marks:
-            Number(q.marks) > 0
-              ? Number(q.marks)
-              : marksPerType[q.questionType] || 1,
         }));
       } else {
         console.warn(
-          `[AI Service] AI returned ${aiQuestions.length} questions but ${requestedCount} were requested. Using deterministic grounded generator instead.`
+          `[AI Service] AI returned ${sanitizedAiQuestions.length} usable questions but ${requestedCount} were requested. Using deterministic grounded generator instead.`
         );
       }
     } catch (aiErr) {

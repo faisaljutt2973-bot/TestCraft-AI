@@ -3,6 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
+const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const connectDB = require('./config/db');
@@ -74,11 +75,12 @@ app.get('/api/health', (req, res) => {
   res.json({
     status: mongoConfigured && !dbConnected ? 'degraded' : 'healthy',
     platform: 'TestCraft AI',
-    version: '1.0.1',
+    version: '1.0.2',
     database: mongoConfigured ? (dbConnected ? 'connected' : 'disconnected') : 'local-file',
     uptimeSeconds: Math.round(process.uptime()),
     timestamp: new Date().toISOString(),
     environment: process.env.NODE_ENV || 'development',
+    uploadMaxMb: Math.min(Math.max(parseInt(process.env.UPLOAD_MAX_SIZE_MB, 10) || 50, 1), 200),
   });
 });
 
@@ -137,12 +139,34 @@ app.use((req, res) => {
   res.status(404).json({ success: false, message: 'API endpoint or resource not found.' });
 });
 
+// Upload errors should be actionable (size/type) instead of generic 500s.
+app.use((err, req, res, next) => {
+  if (!(err instanceof multer.MulterError)) return next(err);
+  console.warn('[Upload] Rejected by multer:', err.code, err.message);
+  const messages = {
+    LIMIT_FILE_SIZE: `The uploaded file is too large. The maximum size is ${
+      Math.min(Math.max(parseInt(process.env.UPLOAD_MAX_SIZE_MB, 10) || 50, 1), 200)
+    } MB.`,
+    LIMIT_FILE_COUNT: 'Only one document can be uploaded at a time.',
+    LIMIT_UNEXPECTED_FILE: 'Unexpected file field. Upload the document using the "document" field.',
+    LIMIT_FIELD_SIZE: 'One of the uploaded form fields is too long.',
+    LIMIT_FIELD_COUNT: 'Too many form fields were submitted.',
+  };
+  const status = err.code === 'LIMIT_FILE_SIZE' ? 413 : 400;
+  return res.status(status).json({
+    success: false,
+    code: err.code,
+    message: messages[err.code] || 'The uploaded file could not be accepted.',
+  });
+});
+
 // Global Error Handler (registered last so it catches all preceding middleware)
 app.use((err, req, res, next) => {
   console.error('[Server Error]', err);
-  const status = err.status || 500;
+  const status = err.status || (err.code === 'UNSUPPORTED_FILE_TYPE' ? 415 : 500);
   res.status(status).json({
     success: false,
+    code: err.code,
     message: err.message || 'An unexpected internal server error occurred.',
     error: process.env.NODE_ENV === 'development' ? err.stack : undefined,
   });
@@ -164,6 +188,15 @@ const warnProductionConfig = () => {
     console.warn('[Config] WARNING: client/dist not found. Run "npm run build" in /client so the server can serve the app.');
   }
 };
+
+// Log unhandled failures instead of leaving the process in an unknown state.
+process.on('unhandledRejection', (reason) => {
+  console.error('[Unhandled Rejection]', reason instanceof Error ? reason.stack : reason);
+});
+process.on('uncaughtException', (error) => {
+  console.error('[Uncaught Exception]', error);
+  setTimeout(() => process.exit(1), 1000);
+});
 
 // Initialize Database & Seed Sample Data before accepting requests
 (async () => {

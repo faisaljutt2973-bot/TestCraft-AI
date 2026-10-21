@@ -72,7 +72,7 @@ export const TestGenerator = ({ preselectedBook, preselectedChapters, preselecte
         setBooks(res.books);
         if (!selectedBookId && res.books.length > 0) {
           setSelectedBookId(res.books[0].id);
-          setSelectedChapters((res.books[0].chapters || []).map((c) => c.chapterNumber));
+          setSelectedChapters((res.books[0].chapters || []).filter((c) => !c.isExcluded).map((c) => c.chapterNumber));
         }
       }
     } catch (err) {
@@ -101,6 +101,11 @@ export const TestGenerator = ({ preselectedBook, preselectedChapters, preselecte
   }, [generating]);
 
   const currentBook = books.find((b) => b.id === selectedBookId) || preselectedBook;
+  const currentChapters = currentBook?.chapters || [];
+  const contentChapters = currentChapters.filter((chapter) => (chapter.contentLength || 0) > 0);
+  const selectedChaptersWithContent = currentChapters.filter(
+    (chapter) => selectedChapters.includes(chapter.chapterNumber) && (chapter.contentLength || 0) > 0
+  );
 
   useEffect(() => {
     if (currentBook) {
@@ -136,7 +141,7 @@ export const TestGenerator = ({ preselectedBook, preselectedChapters, preselecte
     setSelectedBookId(id);
     const b = books.find((x) => x.id === id);
     if (b) {
-      setSelectedChapters((b.chapters || []).map((c) => c.chapterNumber));
+      setSelectedChapters((b.chapters || []).filter((c) => !c.isExcluded).map((c) => c.chapterNumber));
       setTitle(`${b.className} ${b.subject} - ${examType}`);
     }
   };
@@ -151,7 +156,7 @@ export const TestGenerator = ({ preselectedBook, preselectedChapters, preselecte
 
   const handleSelectAllChapters = () => {
     if (currentBook) {
-      setSelectedChapters((currentBook.chapters || []).map((c) => c.chapterNumber));
+      setSelectedChapters((currentBook.chapters || []).filter((c) => !c.isExcluded).map((c) => c.chapterNumber));
     }
   };
 
@@ -164,6 +169,11 @@ export const TestGenerator = ({ preselectedBook, preselectedChapters, preselecte
 
     if (!currentBook) {
       setErrorMessage('Please select a textbook before generating a paper.');
+      return;
+    }
+
+    if (currentChapters.length === 0) {
+      setErrorMessage('This book has no chapters yet. Upload its PDF or add chapters from the book detail page first.');
       return;
     }
 
@@ -312,7 +322,41 @@ export const TestGenerator = ({ preselectedBook, preselectedChapters, preselecte
             )}
           </div>
 
-          {currentBook && (
+          {currentBook && currentChapters.length === 0 && (
+            <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900 flex items-start gap-2">
+              <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+              <span>
+                This book has no chapters yet. Open it from the Textbook Library to upload its PDF or add chapters.
+              </span>
+            </div>
+          )}
+
+          {currentBook && currentChapters.length > 0 && (
+            <div
+              className={`p-3 rounded-xl border text-xs flex items-start gap-2 ${
+                contentChapters.length > 0
+                  ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                  : 'bg-sky-50 border-sky-200 text-sky-900'
+              }`}
+            >
+              {contentChapters.length > 0 ? (
+                <CheckCircle2 className="w-4 h-4 flex-shrink-0 mt-0.5" />
+              ) : (
+                <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+              )}
+              <span>
+                {contentChapters.length > 0
+                  ? `Extracted text is available for ${contentChapters.length} of ${currentChapters.length} chapters${
+                      selectedChaptersWithContent.length > 0
+                        ? ` (${selectedChaptersWithContent.length} selected)`
+                        : ''
+                    }.`
+                  : 'This book has chapter outlines only. Questions will use chapter titles and topics; upload the PDF for content-grounded questions.'}
+              </span>
+            </div>
+          )}
+
+          {currentBook && currentChapters.length > 0 && (
             <div>
               <div className="flex items-center justify-between mb-2">
                 <span className="text-xs font-bold text-slate-700">
@@ -328,13 +372,15 @@ export const TestGenerator = ({ preselectedBook, preselectedChapters, preselecte
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-h-72 overflow-y-auto pr-1">
-                {(currentBook.chapters || []).map((ch) => {
+                {currentChapters.map((ch) => {
                   const isChecked = selectedChapters.includes(ch.chapterNumber);
                   return (
                     <label
                       key={ch.id}
                       className={`flex items-start gap-2.5 p-3 rounded-xl border text-xs cursor-pointer transition-all ${
-                        isChecked
+                        ch.isExcluded
+                          ? 'border-slate-200 bg-slate-50 opacity-50 cursor-not-allowed'
+                          : isChecked
                           ? 'border-brand-400 bg-brand-50/50 text-brand-950 font-semibold'
                           : 'border-slate-200 hover:bg-slate-50 text-slate-700'
                       }`}
@@ -342,12 +388,22 @@ export const TestGenerator = ({ preselectedBook, preselectedChapters, preselecte
                       <input
                         type="checkbox"
                         checked={isChecked}
+                        disabled={ch.isExcluded}
                         onChange={() => handleToggleChapter(ch.chapterNumber)}
                         className="mt-0.5 rounded text-brand-600 focus:ring-brand-500"
                       />
                       <div className="min-w-0">
                         <span className="font-bold text-brand-700">Ch {ch.chapterNumber}: </span>
                         <span>{ch.title}</span>
+                        <span
+                          className={`ml-2 inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded ${
+                            (ch.contentLength || 0) > 0
+                              ? 'bg-emerald-100 text-emerald-700'
+                              : 'bg-slate-100 text-slate-500'
+                          }`}
+                        >
+                          {(ch.contentLength || 0) > 0 ? 'Text' : 'Outline'}
+                        </span>
                       </div>
                     </label>
                   );
@@ -593,7 +649,12 @@ export const TestGenerator = ({ preselectedBook, preselectedChapters, preselecte
             </div>
             <div className="flex justify-between">
               <span className="text-slate-500">Chapters Included:</span>
-              <span className="font-bold">{selectedChapters.length} Chapters</span>
+              <span className="font-bold">
+                {selectedChapters.length} Chapters
+                {selectedChaptersWithContent.length > 0
+                  ? ` (${selectedChaptersWithContent.length} with extracted text)`
+                  : ' (outline-based)'}
+              </span>
             </div>
             <div className="flex justify-between">
               <span className="text-slate-500">Total Marks:</span>
@@ -610,7 +671,7 @@ export const TestGenerator = ({ preselectedBook, preselectedChapters, preselecte
           <div className="pt-2">
             <button
               onClick={handleGenerate}
-              disabled={generating || !isMarksBalanced}
+              disabled={generating || !isMarksBalanced || currentChapters.length === 0}
               className="w-full py-3.5 px-6 rounded-xl font-extrabold text-sm text-white bg-gradient-to-r from-brand-600 via-indigo-600 to-brand-700 hover:from-brand-700 hover:to-indigo-800 shadow-lg shadow-brand-600/30 transition-all flex items-center justify-center gap-2 hover:scale-[1.01] disabled:opacity-50"
             >
               {generating ? (

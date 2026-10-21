@@ -55,7 +55,7 @@ const generateTest = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Please select a textbook or syllabus source.' });
     }
 
-    const chapters = Array.isArray(selectedChapters)
+    let chapters = Array.isArray(selectedChapters)
       ? [...new Set(selectedChapters.map((chapter) => String(chapter)))]
       : [];
     if (chapters.length === 0) {
@@ -117,6 +117,31 @@ const generateTest = async (req, res) => {
     if (book.isPublic === false && book.createdBy !== userId && req.user.role !== 'admin') {
       return res.status(404).json({ success: false, message: 'Selected book could not be found.' });
     }
+
+    const bookChapters = Array.isArray(book.chapters) ? book.chapters : [];
+    if (bookChapters.length === 0) {
+      return res.status(400).json({
+        success: false,
+        code: 'BOOK_HAS_NO_CHAPTERS',
+        message:
+          'This book has no chapters yet. Upload the book PDF to extract chapters, or add chapters from the book detail page before generating a test.',
+      });
+    }
+
+    const requestedChapterKeys = new Set(chapters);
+    const matchedChapters = bookChapters.filter(
+      (chapter) =>
+        requestedChapterKeys.has(String(chapter.chapterNumber)) || requestedChapterKeys.has(String(chapter.id))
+    );
+    if (matchedChapters.length === 0) {
+      return res.status(400).json({
+        success: false,
+        code: 'INVALID_CHAPTERS',
+        message: 'The selected chapters no longer exist in this book. Refresh the book and select chapters again.',
+      });
+    }
+
+    chapters = [...new Set(matchedChapters.map((chapter) => String(chapter.chapterNumber)))];
 
     const resolvedExamType = sanitizeText(examType, 80) || 'Chapter-wise test';
     const fingerprint = crypto

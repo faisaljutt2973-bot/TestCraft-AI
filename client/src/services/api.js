@@ -198,6 +198,21 @@ export const api = {
     });
     return handleResponse(res);
   },
+  attachBookFile: async (id, formData) => {
+    const res = await fetch(`${API_BASE}/books/${id}/upload`, {
+      method: 'POST',
+      headers: getHeaders(true),
+      body: formData,
+    });
+    return handleResponse(res);
+  },
+  getBookUploadJob: async (jobId) => {
+    const res = await fetch(`${API_BASE}/books/jobs/${jobId}`, {
+      headers: getHeaders(),
+    });
+    return handleResponse(res);
+  },
+  getBookFileUrl: (id) => `${API_BASE}/books/${id}/file`,
   searchGoogleBooks: async (q) => {
     const res = await fetch(`${API_BASE}/books/google-search?q=${encodeURIComponent(q)}`, {
       headers: getHeaders(),
